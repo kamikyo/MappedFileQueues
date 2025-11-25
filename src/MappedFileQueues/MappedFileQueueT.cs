@@ -83,8 +83,9 @@ public sealed class MappedFileQueue<T> : IDisposable where T : struct
             if (producer.Offset > consumer.Offset
                 && !consumer.NextMessageAvailable())
             {
-                throw new InvalidOperationException(
-                    "After recovering the producer's offset, the consumer still cannot consume the next message, the data may be corrupted.");
+                _options.ExceptionOccurred?.Invoke(new InvalidOperationException(
+                    "After recovering the producer's offset, the consumer still cannot consume the next message, the data may be corrupted."));
+                consumer.AdjustOffset(producer.Offset, true);
             }
         }
         finally

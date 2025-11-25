@@ -38,7 +38,7 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
 
     public long Offset => _offsetFile.Offset;
 
-    public void AdjustOffset(long offset)
+    public void AdjustOffset(long offset, bool force = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -47,12 +47,17 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
             throw new ArgumentOutOfRangeException(nameof(offset), "Offset must be greater than or equal to zero.");
         }
 
-        if (_segment != null)
+        if (_segment != null && !force)
         {
             throw new InvalidOperationException(
                 "Cannot adjust offset while there is an active segment. Please adjust the offset before consuming any messages.");
         }
 
+        if (force && _segment != null)
+        {
+            _segment.Dispose();
+            _segment = null;
+        }
         _offsetFile.MoveTo(offset, true);
     }
 

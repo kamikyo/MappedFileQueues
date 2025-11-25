@@ -13,7 +13,7 @@ public interface IMappedFileConsumer<T> where T : struct
     /// <param name="offset">The new offset to set.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the provided offset is negative.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the producer has already started consuming messages.</exception>
-    public void AdjustOffset(long offset);
+    public void AdjustOffset(long offset, bool force = false);
 
     /// <summary>
     /// Consumes a message from the mapped file queue.

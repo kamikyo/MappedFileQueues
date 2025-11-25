@@ -26,4 +26,12 @@ public class MappedFileQueueOptions
     /// Number of produced items after which the producer will perform a forced flush.
     /// </summary>
     public long ProducerForceFlushIntervalCount { get; set; } = 1000;
+
+    /// <summary>
+    /// Occurs when an exception is raised during the execution of an operation.
+    /// </summary>
+    /// <remarks>Subscribers can use this event to handle or log exceptions that occur within the component.
+    /// The event provides the exception instance as event data, allowing inspection of the error details. This event is
+    /// typically raised for recoverable or handled exceptions; fatal errors may not trigger the event.</remarks>
+    public Action<Exception> ExceptionOccurred;
 }
