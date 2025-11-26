@@ -102,6 +102,7 @@ RESET_TAG:
                     if (consumerOffsetUnchangedCount >= _options.UnMatchedCheckCount)
                     {
                         shouldCheckProducerOffset = true;
+                        consumerOffsetUnchangedCount = 0;
                     }
                 }
                 else
