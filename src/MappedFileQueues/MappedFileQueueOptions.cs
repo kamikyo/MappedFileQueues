@@ -30,5 +30,5 @@ public class MappedFileQueueOptions
     /// <summary>
     /// The number of un-matched check attempts when consuming items.
     /// </summary>
-    public int UnMatchedCheckCount { get; set; }
+    public int UnMatchedCheckCount { get; set; } = 3;
 }
