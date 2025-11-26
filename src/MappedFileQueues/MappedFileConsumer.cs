@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 
 namespace MappedFileQueues;
@@ -13,6 +14,8 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
     private readonly int _payloadSize;
 
     private readonly string _segmentDirectory;
+
+    private readonly string _producerOffsetPath;
 
     private MappedFileSegment<T>? _segment;
 
@@ -34,6 +37,9 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
         _payloadSize = Unsafe.SizeOf<T>();
 
         _segmentDirectory = Path.Combine(options.StorePath, Constants.CommitLogDirectory);
+
+        var producerOffsetPath = Path.Combine(offsetDir, Constants.ProducerOffsetFile);
+        _producerOffsetPath = producerOffsetPath;
     }
 
     public long Offset => _offsetFile.Offset;
@@ -62,7 +68,7 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
 
         var retryIntervalMs = (int)_options.ConsumerRetryInterval.TotalMilliseconds;
         var spinWaitDurationMs = (int)_options.ConsumerSpinWaitDuration.TotalMilliseconds;
-
+RESET_TAG:
         while (_segment == null)
         {
             if (!TryFindSegmentByOffset(out _segment))
@@ -73,12 +79,61 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
 
         var spinWait = new SpinWait();
         var startTicks = DateTime.UtcNow.Ticks;
+        var consumerOffsetUnchangedCount = 0;
+        long? lastConsumerOffsetInSleep = null;
+        bool shouldCheckProducerOffset = false;
+        long? lastProducerOffset = null;
 
         while (!_segment.TryRead(_offsetFile.Offset, out message))
         {
             // Spin wait until the message is available or timeout
             if ((DateTime.UtcNow.Ticks - startTicks) / TimeSpan.TicksPerMillisecond > spinWaitDurationMs)
             {
+                // Record current consumer offset before sleep
+                var currentConsumerOffset = _offsetFile.Offset;
+
+                // Check if consumer offset has changed since last sleep
+                if (lastConsumerOffsetInSleep.HasValue && currentConsumerOffset == lastConsumerOffsetInSleep.Value)
+                {
+                    // Consumer offset hasn't changed, increment counter
+                    consumerOffsetUnchangedCount++;
+                    
+                    // If consumer offset hasn't changed for UnMatchedCheckCount times, start checking producer offset
+                    if (consumerOffsetUnchangedCount >= _options.UnMatchedCheckCount)
+                    {
+                        shouldCheckProducerOffset = true;
+                    }
+                }
+                else
+                {
+                    // Consumer offset has changed, reset counter
+                    consumerOffsetUnchangedCount = 0;
+                    shouldCheckProducerOffset = false;
+                    lastProducerOffset = null;
+                }
+
+                // Update last consumer offset
+                lastConsumerOffsetInSleep = currentConsumerOffset;
+
+                // If we should check producer offset, do it now
+                if (shouldCheckProducerOffset)
+                {
+                    var currentProducerOffset = ReadProducerOffset();
+                    if (currentProducerOffset.HasValue)
+                    {
+                        if (lastProducerOffset.HasValue && currentProducerOffset.Value > lastProducerOffset.Value)
+                        {
+                            _segment?.Dispose();
+                            _segment = null;
+
+                            // Producer offset is changing, immediately align consumer offset to producer offset
+                            AdjustOffset(lastProducerOffset.Value);
+goto RESET_TAG;
+                        }
+                        lastProducerOffset = currentProducerOffset;
+                    }
+                }
+
                 // Sleep for a short interval before retrying if spin wait times out
                 Thread.Sleep(retryIntervalMs);
             }
@@ -126,4 +181,38 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
             _options.SegmentSize,
             _offsetFile.Offset,
             out segment);
+
+    private long? ReadProducerOffset()
+    {
+        try
+        {
+            if (!File.Exists(_producerOffsetPath))
+            {
+                return null;
+            }
+
+            using var fileStream = new FileStream(
+                _producerOffsetPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
+
+            using var mmf = MemoryMappedFile.CreateFromFile(
+                fileStream,
+                null,
+                sizeof(long),
+                MemoryMappedFileAccess.Read,
+                HandleInheritability.None,
+                true);
+
+            using var accessor = mmf.CreateViewAccessor(0, sizeof(long), MemoryMappedFileAccess.Read);
+            accessor.Read(0, out long offset);
+            return offset;
+        }
+        catch
+        {
+            // If we can't read the producer offset, return null
+            return null;
+        }
+    }
 }

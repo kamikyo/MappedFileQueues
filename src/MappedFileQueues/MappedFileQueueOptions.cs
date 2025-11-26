@@ -21,4 +21,6 @@ public class MappedFileQueueOptions
     /// The maximum duration a consumer will spin-wait each time for an item to become available.
     /// </summary>
     public TimeSpan ConsumerSpinWaitDuration { get; set; } = TimeSpan.FromMilliseconds(100);
+
+    public int UnMatchedCheckCount { get; set; }
 }
