@@ -22,5 +22,13 @@ public class MappedFileQueueOptions
     /// </summary>
     public TimeSpan ConsumerSpinWaitDuration { get; set; } = TimeSpan.FromMilliseconds(100);
 
+    /// <summary>
+    /// The action to call when an exception occurs.
+    /// </summary>
+    public Action<Exception>? ExceptionOccurred { get; set; }
+
+    /// <summary>
+    /// The number of un-matched check attempts when consuming items.
+    /// </summary>
     public int UnMatchedCheckCount { get; set; }
 }
