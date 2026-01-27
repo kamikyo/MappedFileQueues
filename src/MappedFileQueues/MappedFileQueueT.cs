@@ -9,7 +9,10 @@ public sealed class MappedFileQueue<T> : IDisposable where T : struct
 
     public MappedFileQueue(MappedFileQueueOptions options)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(options.StorePath, nameof(options.StorePath));
+        if(string.IsNullOrWhiteSpace(options.StorePath))
+        {
+            throw new ArgumentException("StorePath cannot be null or whitespace.", nameof(options.StorePath));
+        }
 
         if (File.Exists(options.StorePath))
         {

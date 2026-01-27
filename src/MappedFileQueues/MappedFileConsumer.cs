@@ -46,7 +46,7 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
 
     public void AdjustOffset(long offset)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if(_disposed) throw new ObjectDisposedException(nameof(MappedFileConsumer<T>));
 
         if (offset < 0)
         {
@@ -64,7 +64,7 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
 
     public void Consume(out T message)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if(_disposed) throw new ObjectDisposedException(nameof(MappedFileConsumer<T>));
 
         var retryIntervalMs = (int)_options.ConsumerRetryInterval.TotalMilliseconds;
         var spinWaitDurationMs = (int)_options.ConsumerSpinWaitDuration.TotalMilliseconds;
@@ -146,7 +146,7 @@ goto RESET_TAG;
 
     public void Commit()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if(_disposed) throw new ObjectDisposedException(nameof(MappedFileConsumer<T>));
 
         if (_segment == null)
         {

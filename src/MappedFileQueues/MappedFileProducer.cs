@@ -39,7 +39,7 @@ internal class MappedFileProducer<T> : IMappedFileProducer<T>, IDisposable where
 
     public void Produce(ref T message)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if(_disposed) throw new ObjectDisposedException(nameof(MappedFileProducer<T>));
 
         _segment ??= FindOrCreateSegmentByOffset();
 
@@ -62,7 +62,7 @@ internal class MappedFileProducer<T> : IMappedFileProducer<T>, IDisposable where
 
     private void Commit()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if(_disposed) throw new ObjectDisposedException(nameof(MappedFileProducer<T>));
 
         if (_segment == null)
         {
