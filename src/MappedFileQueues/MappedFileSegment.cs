@@ -6,6 +6,8 @@ namespace MappedFileQueues;
 
 internal sealed class MappedFileSegment<T> : IDisposable where T : struct
 {
+    private const int SegmentFileNameLength = 20;
+
     private readonly FileStream _fileStream;
     private readonly MemoryMappedFile _mmf;
     private readonly MemoryMappedViewAccessor _viewAccessor;
@@ -150,7 +152,7 @@ internal sealed class MappedFileSegment<T> : IDisposable where T : struct
         long offset)
     {
         var fileStartOffset = GetFileStartOffset(fileSize, offset);
-        var fileName = fileStartOffset.ToString("D20");
+        var fileName = fileStartOffset.ToString($"D{SegmentFileNameLength}");
 
         var filePath = Path.Combine(directory, fileName);
 
@@ -181,7 +183,7 @@ internal sealed class MappedFileSegment<T> : IDisposable where T : struct
         [MaybeNullWhen(false)] out MappedFileSegment<T> segment)
     {
         var fileStartOffset = GetFileStartOffset(fileSize, offset);
-        var fileName = fileStartOffset.ToString("D20");
+        var fileName = fileStartOffset.ToString($"D{SegmentFileNameLength}");
 
         var filePath = Path.Combine(directory, fileName);
 
@@ -196,6 +198,44 @@ internal sealed class MappedFileSegment<T> : IDisposable where T : struct
             fileSize,
             fileStartOffset,
             readOnly: true);
+        return true;
+    }
+
+    /// <summary>
+    /// 尝试获取当前目录中最老分段的起始偏移量。
+    /// </summary>
+    public static bool TryFindEarliestStartOffset(
+        string directory,
+        out long earliestStartOffset)
+    {
+        earliestStartOffset = default;
+
+        if (!Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        long? minOffset = null;
+        foreach (var filePath in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+        {
+            var fileName = Path.GetFileName(filePath);
+            if (fileName.Length != SegmentFileNameLength || !long.TryParse(fileName, out var startOffset))
+            {
+                continue;
+            }
+
+            if (!minOffset.HasValue || startOffset < minOffset.Value)
+            {
+                minOffset = startOffset;
+            }
+        }
+
+        if (!minOffset.HasValue)
+        {
+            return false;
+        }
+
+        earliestStartOffset = minOffset.Value;
         return true;
     }
 

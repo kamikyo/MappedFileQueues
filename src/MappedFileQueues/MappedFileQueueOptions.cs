@@ -31,4 +31,11 @@ public class MappedFileQueueOptions
     /// The number of un-matched check attempts when consuming items.
     /// </summary>
     public int UnMatchedCheckCount { get; set; } = 3;
+
+    /// <summary>
+    /// 当消费者游标早于当前最老可用分段时的处理策略。
+    /// 默认自动跳转到最老可用分段，避免启动后无限等待不存在的旧分段。
+    /// </summary>
+    public ConsumerOffsetOutOfRangeStrategy ConsumerOffsetOutOfRangeStrategy { get; set; } =
+        ConsumerOffsetOutOfRangeStrategy.MoveToEarliestSegment;
 }

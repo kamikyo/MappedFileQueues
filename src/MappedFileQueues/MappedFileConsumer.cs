@@ -73,12 +73,17 @@ RESET_TAG:
         {
             if (!TryFindSegmentByOffset(out _segment))
             {
+                if (TryResolveOffsetBeforeEarliestSegment())
+                {
+                    continue;
+                }
+
                 Thread.Sleep(retryIntervalMs);
             }
         }
 
         var spinWait = new SpinWait();
-        var startTicks = DateTime.UtcNow.Ticks;
+        var startTicks = DateTime.Now.Ticks;
         var consumerOffsetUnchangedCount = 0;
         long? lastConsumerOffsetInSleep = null;
         bool shouldCheckProducerOffset = false;
@@ -87,7 +92,7 @@ RESET_TAG:
         while (!_segment.TryRead(_offsetFile.Offset, out message))
         {
             // Spin wait until the message is available or timeout
-            if ((DateTime.UtcNow.Ticks - startTicks) / TimeSpan.TicksPerMillisecond > spinWaitDurationMs)
+            if ((DateTime.Now.Ticks - startTicks) / TimeSpan.TicksPerMillisecond > spinWaitDurationMs)
             {
                 // Record current consumer offset before sleep
                 var currentConsumerOffset = _offsetFile.Offset;
@@ -182,6 +187,31 @@ goto RESET_TAG;
             _options.SegmentSize,
             _offsetFile.Offset,
             out segment);
+
+    /// <summary>
+    /// 当消费者游标落在当前最老分段之前时，按配置决定自动前移还是直接失败。
+    /// </summary>
+    private bool TryResolveOffsetBeforeEarliestSegment()
+    {
+        if (!MappedFileSegment<T>.TryFindEarliestStartOffset(_segmentDirectory, out var earliestStartOffset))
+        {
+            return false;
+        }
+
+        if (_offsetFile.Offset >= earliestStartOffset)
+        {
+            return false;
+        }
+
+        if (_options.ConsumerOffsetOutOfRangeStrategy == ConsumerOffsetOutOfRangeStrategy.FailFast)
+        {
+            throw new InvalidOperationException(
+                $"消费者游标 {_offsetFile.Offset} 早于当前最老可用分段 {earliestStartOffset}。");
+        }
+
+        _offsetFile.MoveTo(earliestStartOffset);
+        return true;
+    }
 
     private long? ReadProducerOffset()
     {
