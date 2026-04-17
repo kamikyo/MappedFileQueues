@@ -49,10 +49,16 @@ internal class OffsetMappedFile : IDisposable
         _vierAccessor.Write(0, _offset);
     }
 
+    public void Flush()
+    {
+        _vierAccessor.Flush();
+        _fileStream.Flush(true);
+    }
+
     public void Dispose()
     {
-        _fileStream.Dispose();
-        _mmf.Dispose();
         _vierAccessor.Dispose();
+        _mmf.Dispose();
+        _fileStream.Dispose();
     }
 }

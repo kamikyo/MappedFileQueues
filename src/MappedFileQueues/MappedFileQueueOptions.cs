@@ -38,4 +38,10 @@ public class MappedFileQueueOptions
     /// </summary>
     public ConsumerOffsetOutOfRangeStrategy ConsumerOffsetOutOfRangeStrategy { get; set; } =
         ConsumerOffsetOutOfRangeStrategy.MoveToEarliestSegment;
+
+    /// <summary>
+    /// 持久化与启动恢复配置。
+    /// </summary>
+    public MappedFilePersistenceOptions Persistence { get; set; } =
+        MappedFilePersistenceOptions.ForMechanicalDisk();
 }

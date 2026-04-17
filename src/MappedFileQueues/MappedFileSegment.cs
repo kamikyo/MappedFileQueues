@@ -132,6 +132,12 @@ internal sealed class MappedFileSegment<T> : IDisposable where T : struct
         return true;
     }
 
+    public void Flush()
+    {
+        _viewAccessor.Flush();
+        _fileStream.Flush(true);
+    }
+
     public void Dispose()
     {
         _viewAccessor.Dispose();
@@ -237,6 +243,96 @@ internal sealed class MappedFileSegment<T> : IDisposable where T : struct
 
         earliestStartOffset = minOffset.Value;
         return true;
+    }
+
+    public static bool TryFindTailOffset(
+        string directory,
+        long fileSize,
+        out long tailOffset)
+    {
+        tailOffset = default;
+
+        if (!TryFindSegmentStartOffsets(directory, out var startOffsets))
+        {
+            return false;
+        }
+
+        foreach (var startOffset in startOffsets.OrderByDescending(static offset => offset))
+        {
+            using var segment = new MappedFileSegment<T>(
+                Path.Combine(directory, startOffset.ToString($"D{SegmentFileNameLength}")),
+                fileSize,
+                startOffset,
+                readOnly: true);
+
+            var candidateOffset = segment.FindTailOffsetInSegment();
+            if (candidateOffset > startOffset || startOffset == startOffsets[^1])
+            {
+                tailOffset = candidateOffset;
+                return true;
+            }
+        }
+
+        tailOffset = startOffsets[0];
+        return true;
+    }
+
+    private long FindTailOffsetInSegment()
+    {
+        var messageSize = _payloadSize + Constants.EndMarkerSize;
+        var offset = StartOffset;
+
+        while (offset <= AllowedLastOffsetToWrite)
+        {
+            if (!HasEndMarker(offset))
+            {
+                break;
+            }
+
+            offset += messageSize;
+        }
+
+        return offset;
+    }
+
+    private bool HasEndMarker(long offset)
+    {
+        var segmentRelativeOffset = offset - StartOffset;
+        if (segmentRelativeOffset < 0 || offset > AllowedLastOffsetToWrite)
+        {
+            return false;
+        }
+
+        return _viewAccessor.ReadByte(segmentRelativeOffset + _payloadSize) == Constants.EndMarker;
+    }
+
+    private static bool TryFindSegmentStartOffsets(
+        string directory,
+        [MaybeNullWhen(false)] out long[] startOffsets)
+    {
+        startOffsets = null;
+
+        if (!Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        var offsets = new List<long>();
+        foreach (var filePath in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+        {
+            var fileName = Path.GetFileName(filePath);
+            if (fileName.Length != SegmentFileNameLength || !long.TryParse(fileName, out var startOffset))
+            {
+                continue;
+            }
+
+            offsets.Add(startOffset);
+        }
+
+        offsets.Sort();
+        startOffsets = offsets.ToArray();
+
+        return startOffsets.Length > 0;
     }
 
     private static long GetFileStartOffset(long fileSize, long offset)

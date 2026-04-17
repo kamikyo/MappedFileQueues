@@ -6,8 +6,12 @@ internal class MappedFileProducer<T> : IMappedFileProducer<T>, IDisposable where
 {
     private readonly MappedFileQueueOptions _options;
 
+    private readonly MappedFilePersistenceOptions _persistenceOptions;
+
     // Memory mapped file to store the producer offset
     private readonly OffsetMappedFile _offsetFile;
+
+    private readonly OffsetFlushCheckpoint _offsetFlushCheckpoint;
 
     private readonly int _payloadSize;
 
@@ -20,6 +24,7 @@ internal class MappedFileProducer<T> : IMappedFileProducer<T>, IDisposable where
     public MappedFileProducer(MappedFileQueueOptions options)
     {
         _options = options;
+        _persistenceOptions = options.Persistence ?? MappedFilePersistenceOptions.ForMechanicalDisk();
 
         var offsetDir = Path.Combine(options.StorePath, Constants.OffsetDirectory);
         if (!Directory.Exists(offsetDir))
@@ -29,10 +34,13 @@ internal class MappedFileProducer<T> : IMappedFileProducer<T>, IDisposable where
 
         var offsetPath = Path.Combine(offsetDir, Constants.ProducerOffsetFile);
         _offsetFile = new OffsetMappedFile(offsetPath);
+        _offsetFlushCheckpoint = new OffsetFlushCheckpoint(_persistenceOptions.ProducerOffset);
 
         _payloadSize = Unsafe.SizeOf<T>();
 
         _segmentDirectory = Path.Combine(options.StorePath, Constants.CommitLogDirectory);
+
+        RecoverOffsetFromCommitLogTail();
     }
 
     public long Offset => _offsetFile.Offset;
@@ -56,6 +64,8 @@ internal class MappedFileProducer<T> : IMappedFileProducer<T>, IDisposable where
         }
 
         _disposed = true;
+        FlushSegmentOnDispose();
+        FlushOffsetOnDispose();
         _offsetFile.Dispose();
         _segment?.Dispose();
     }
@@ -70,13 +80,70 @@ internal class MappedFileProducer<T> : IMappedFileProducer<T>, IDisposable where
         }
 
         _offsetFile.Advance(_payloadSize + Constants.EndMarkerSize);
+        var shouldFlushOffset = _offsetFlushCheckpoint.RecordMessageAndShouldFlush();
 
         // Check if the segment has reached its limit
         if (_segment.AllowedLastOffsetToWrite < _offsetFile.Offset)
         {
+            _segment.Flush();
+            FlushOffsetOnSegmentSwitch(shouldFlushOffset);
+
             // Dispose the current segment and will create a new one on the next Produce call
             _segment.Dispose();
             _segment = null;
+            return;
+        }
+
+        if (shouldFlushOffset)
+        {
+            FlushOffset();
+        }
+    }
+
+    private void FlushOffsetOnSegmentSwitch(bool shouldFlushOffset)
+    {
+        if (shouldFlushOffset || _offsetFlushCheckpoint.ShouldFlushOnSegmentSwitch)
+        {
+            FlushOffset();
+        }
+    }
+
+    private void FlushOffsetOnDispose()
+    {
+        if (_offsetFlushCheckpoint.ShouldFlushOnDispose)
+        {
+            FlushOffset();
+        }
+    }
+
+    private void FlushOffset()
+    {
+        _offsetFile.Flush();
+        _offsetFlushCheckpoint.MarkFlushed();
+    }
+
+    private void FlushSegmentOnDispose()
+    {
+        _segment?.Flush();
+    }
+
+    private void RecoverOffsetFromCommitLogTail()
+    {
+        var recoveryOptions = _persistenceOptions.Recovery;
+        if (!recoveryOptions.RecoverProducerOffsetFromCommitLogTail)
+        {
+            return;
+        }
+
+        if (!MappedFileSegment<T>.TryFindTailOffset(_segmentDirectory, _options.SegmentSize, out var tailOffset))
+        {
+            return;
+        }
+
+        if (recoveryOptions.PreferCommitLogTailOverProducerOffset || tailOffset > _offsetFile.Offset)
+        {
+            _offsetFile.MoveTo(tailOffset);
+            _offsetFlushCheckpoint.MarkDirty();
         }
     }
 

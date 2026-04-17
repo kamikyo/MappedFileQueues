@@ -8,8 +8,12 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
 {
     private readonly MappedFileQueueOptions _options;
 
+    private readonly MappedFilePersistenceOptions _persistenceOptions;
+
     // Memory mapped file to store the consumer offset
     private readonly OffsetMappedFile _offsetFile;
+
+    private readonly OffsetFlushCheckpoint _offsetFlushCheckpoint;
 
     private readonly int _payloadSize;
 
@@ -24,6 +28,7 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
     public MappedFileConsumer(MappedFileQueueOptions options)
     {
         _options = options;
+        _persistenceOptions = options.Persistence ?? MappedFilePersistenceOptions.ForMechanicalDisk();
 
         var offsetDir = Path.Combine(options.StorePath, Constants.OffsetDirectory);
         if (!Directory.Exists(offsetDir))
@@ -33,6 +38,7 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
 
         var offsetPath = Path.Combine(offsetDir, Constants.ConsumerOffsetFile);
         _offsetFile = new OffsetMappedFile(offsetPath);
+        _offsetFlushCheckpoint = new OffsetFlushCheckpoint(_persistenceOptions.ConsumerOffset);
 
         _payloadSize = Unsafe.SizeOf<T>();
 
@@ -60,6 +66,7 @@ internal class MappedFileConsumer<T> : IMappedFileConsumer<T>, IDisposable where
         }
 
         _offsetFile.MoveTo(offset);
+        _offsetFlushCheckpoint.MarkDirty();
     }
 
     public void Consume(out T message)
@@ -160,10 +167,12 @@ goto RESET_TAG;
         }
 
         _offsetFile.Advance(_payloadSize + Constants.EndMarkerSize);
+        FlushOffsetIfNeeded();
 
         // Check if the segment is fully consumed
         if (_offsetFile.Offset > _segment.AllowedLastOffsetToWrite)
         {
+            FlushOffsetOnSegmentSwitch();
             _segment.Dispose();
             _segment = null;
         }
@@ -177,6 +186,7 @@ goto RESET_TAG;
         }
 
         _disposed = true;
+        FlushOffsetOnDispose();
         _offsetFile.Dispose();
         _segment?.Dispose();
     }
@@ -210,7 +220,38 @@ goto RESET_TAG;
         }
 
         _offsetFile.MoveTo(earliestStartOffset);
+        _offsetFlushCheckpoint.MarkDirty();
         return true;
+    }
+
+    private void FlushOffsetIfNeeded()
+    {
+        if (_offsetFlushCheckpoint.RecordMessageAndShouldFlush())
+        {
+            FlushOffset();
+        }
+    }
+
+    private void FlushOffsetOnSegmentSwitch()
+    {
+        if (_offsetFlushCheckpoint.ShouldFlushOnSegmentSwitch)
+        {
+            FlushOffset();
+        }
+    }
+
+    private void FlushOffsetOnDispose()
+    {
+        if (_offsetFlushCheckpoint.ShouldFlushOnDispose)
+        {
+            FlushOffset();
+        }
+    }
+
+    private void FlushOffset()
+    {
+        _offsetFile.Flush();
+        _offsetFlushCheckpoint.MarkFlushed();
     }
 
     private long? ReadProducerOffset()
